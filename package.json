@@ -1,12 +1,18 @@
 {
   "name": "contextfix",
   "version": "0.1.0",
-  "description": "Context-aware AI bug-fixing assistant",
+  "description": "Context-aware AI bug-fixing assistant — analyzes repo context and generates fix patches",
   "type": "module",
   "bin": {
     "contextfix": "dist/cli.js"
   },
   "main": "dist/cli.js",
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -21,9 +27,25 @@
     "cli",
     "context-aware",
     "debugging",
-    "developer-tools"
+    "developer-tools",
+    "llm",
+    "openai",
+    "anthropic",
+    "ollama",
+    "typescript",
+    "root-cause-analysis",
+    "patch-generation",
+    "unified-diff"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nanami7777777/Context-Aware-Fixer.git"
+  },
+  "homepage": "https://github.com/nanami7777777/Context-Aware-Fixer#readme",
+  "bugs": {
+    "url": "https://github.com/nanami7777777/Context-Aware-Fixer/issues"
+  },
   "engines": {
     "node": ">=18"
   },

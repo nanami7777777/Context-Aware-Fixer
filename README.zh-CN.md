@@ -1,5 +1,12 @@
 # ContextFix
 
+[![CI](https://github.com/nanami7777777/Context-Aware-Fixer/actions/workflows/ci.yml/badge.svg)](https://github.com/nanami7777777/Context-Aware-Fixer/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/contextfix.svg)](https://www.npmjs.com/package/contextfix)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+
+[English](./README.md) | [中文](./README.zh-CN.md)
+
 上下文感知的 AI 修 Bug 助手。自动分析代码仓库上下文 — 文件依赖、Git 历史、堆栈追踪 — 智能定位根因并生成修复补丁。
 
 TypeScript 原生实现，LLM 调用零外部 SDK 依赖，Node.js 环境即可运行。

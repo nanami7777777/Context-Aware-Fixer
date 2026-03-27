@@ -1,5 +1,12 @@
 # ContextFix
 
+[![CI](https://github.com/nanami7777777/Context-Aware-Fixer/actions/workflows/ci.yml/badge.svg)](https://github.com/nanami7777777/Context-Aware-Fixer/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/contextfix.svg)](https://www.npmjs.com/package/contextfix)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+
+[English](./README.md) | [中文](./README.zh-CN.md)
+
 Context-aware AI bug-fixing assistant for your codebase. Analyzes repository context — file dependencies, Git history, stack traces — and generates targeted fix patches using LLMs.
 
 Built with TypeScript. Zero external SDK dependencies for LLM calls. Runs anywhere Node.js runs.
