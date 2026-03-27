@@ -192,6 +192,7 @@ export interface PatchSet {
 export interface Configuration {
   model: string;
   apiKey?: string;
+  baseUrl?: string;
   contextLimit: number;
   ignorePatterns: string[];
   promptTemplates?: Record<string, string>;

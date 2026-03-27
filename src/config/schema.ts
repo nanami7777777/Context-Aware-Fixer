@@ -197,6 +197,7 @@ function validatePromptTemplates(
 const KNOWN_FIELDS = new Set<string>([
   'model',
   'apiKey',
+  'baseUrl',
   'contextLimit',
   'ignorePatterns',
   'promptTemplates',

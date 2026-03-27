@@ -2,7 +2,8 @@
 
 import { Command } from 'commander';
 import { readFile as fsReadFile, writeFile as fsWriteFile, readFile, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import chalk from 'chalk';
 
 import { ConfigManager } from './config/manager.js';
 import { createLLMProvider } from './llm/provider.js';
@@ -42,7 +43,72 @@ interface CLIOptions {
   baseUrl?: string;
 }
 
-// ─── Node.js FileReader for ContextCollector ─────────────────────────────────
+// ─── Progress Spinner ────────────────────────────────────────────────────────
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+class Spinner {
+  private interval: ReturnType<typeof setInterval> | null = null;
+  private frameIndex = 0;
+  private message = '';
+  private startTime = 0;
+  private enabled: boolean;
+
+  constructor() {
+    this.enabled = process.stderr.isTTY === true;
+  }
+
+  start(message: string): void {
+    this.message = message;
+    this.startTime = Date.now();
+    if (!this.enabled) {
+      process.stderr.write(`  ${message}\n`);
+      return;
+    }
+    this.frameIndex = 0;
+    this.render();
+    this.interval = setInterval(() => this.render(), 80);
+  }
+
+  succeed(message?: string): void {
+    this.stop();
+    const elapsed = this.formatElapsed();
+    const msg = message ?? this.message;
+    process.stderr.write(`  ${chalk.green('✔')} ${msg} ${chalk.dim(elapsed)}\n`);
+  }
+
+  fail(message?: string): void {
+    this.stop();
+    const elapsed = this.formatElapsed();
+    const msg = message ?? this.message;
+    process.stderr.write(`  ${chalk.red('✗')} ${msg} ${chalk.dim(elapsed)}\n`);
+  }
+
+  private render(): void {
+    const frame = SPINNER_FRAMES[this.frameIndex % SPINNER_FRAMES.length];
+    const elapsed = this.formatElapsed();
+    process.stderr.write(`\r  ${chalk.cyan(frame)} ${this.message} ${chalk.dim(elapsed)}`);
+    this.frameIndex++;
+  }
+
+  private stop(): void {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
+    if (this.enabled) {
+      process.stderr.write('\r\x1b[K'); // clear line
+    }
+  }
+
+  private formatElapsed(): string {
+    const ms = Date.now() - this.startTime;
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+}
+
+// ─── Node.js FileReader / FileWriter ─────────────────────────────────────────
 
 class NodeFileReader implements ContextFileReader, PatchFileReader {
   async readFile(filePath: string): Promise<string> {
@@ -67,8 +133,6 @@ class NodeFileReader implements ContextFileReader, PatchFileReader {
   }
 }
 
-// ─── Node.js FileWriter for PatchApplier ─────────────────────────────────────
-
 class NodeFileWriter implements FileWriter {
   async writeFile(filePath: string, content: string): Promise<void> {
     await fsWriteFile(filePath, content, 'utf-8');
@@ -90,29 +154,20 @@ function createLanguageRegistry(): LanguageRegistry {
 
 // ─── Input Reading ───────────────────────────────────────────────────────────
 
-/**
- * Read bug description input from one of three sources:
- * 1. CLI argument (the <bug-description> positional arg)
- * 2. --file <path> option
- * 3. stdin (when piped)
- */
 async function resolveInput(
   bugDescription: string | undefined,
   opts: CLIOptions,
 ): Promise<{ input: string; source: InputSource }> {
-  // 1. --file option takes priority
   if (opts.file) {
     const filePath = resolve(opts.file);
     const content = await fsReadFile(filePath, 'utf-8');
     return { input: content, source: 'file' };
   }
 
-  // 2. CLI argument
   if (bugDescription && bugDescription.trim().length > 0) {
     return { input: bugDescription, source: 'cli-arg' };
   }
 
-  // 3. stdin (only when piped, not interactive TTY)
   if (!process.stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) {
@@ -125,36 +180,54 @@ async function resolveInput(
   }
 
   throw new Error(
-    'No input provided. Pass a bug description as an argument, use --file <path>, or pipe via stdin.\n' +
-      'Examples:\n' +
-      '  contextfix fix "TypeError: Cannot read property \'x\' of undefined"\n' +
-      '  contextfix fix --file error.log\n' +
-      '  cat error.log | contextfix fix',
+    'No input provided.\n\n' +
+      '  Usage:\n' +
+      '    contextfix fix "TypeError: Cannot read property \'x\' of undefined"\n' +
+      '    contextfix fix --file error.log\n' +
+      '    cat error.log | contextfix fix',
   );
 }
 
-// ─── API Key Validation ──────────────────────────────────────────────────────
+// ─── API Key Resolution ──────────────────────────────────────────────────────
+
+function resolveApiKey(config: { apiKey?: string }, model: string): string | undefined {
+  // Priority: config file > env var
+  if (config.apiKey) return config.apiKey;
+
+  const provider = model.split(':')[0];
+  if (provider === 'anthropic') return process.env.ANTHROPIC_API_KEY;
+  return process.env.OPENAI_API_KEY ?? process.env.CONTEXTFIX_API_KEY;
+}
 
 function validateApiKey(model: string, apiKey: string | undefined): void {
   const provider = model.split(':')[0];
-
-  // Ollama doesn't need an API key
   if (provider === 'ollama') return;
 
   if (!apiKey) {
-    const envVarName =
-      provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+    const envVar = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+    process.stderr.write(`
+  ${chalk.red('✗')} API key not configured for provider "${provider}".
 
-    console.error(`\n  ✗ API key not configured for provider "${provider}".\n`);
-    console.error('  Configure your API key using one of these methods:\n');
-    console.error(`  1. Set the environment variable:`);
-    console.error(`     export ${envVarName}=your-api-key\n`);
-    console.error(`  2. Add it to your project config (.contextfix.yml):`);
-    console.error(`     apiKey: your-api-key\n`);
-    console.error(`  3. Add it to your global config (~/.contextfix.yml):`);
-    console.error(`     apiKey: your-api-key\n`);
+  ${chalk.bold('Quick fix — pick one:')}
+
+  ${chalk.dim('1.')} Environment variable:
+     ${chalk.cyan(`export ${envVar}=your-api-key`)}
+
+  ${chalk.dim('2.')} Config file (run ${chalk.cyan('contextfix init')} to create one):
+     ${chalk.cyan('apiKey: your-api-key')}
+
+  ${chalk.dim('3.')} Global config:
+     ${chalk.cyan(`echo 'apiKey: your-api-key' > ~/.contextfix.yml`)}
+
+`);
     process.exit(1);
   }
+}
+
+// ─── Base URL Resolution ─────────────────────────────────────────────────────
+
+function resolveBaseUrl(config: { baseUrl?: string }, opts: CLIOptions): string | undefined {
+  return opts.baseUrl ?? config.baseUrl ?? process.env.CONTEXTFIX_BASE_URL;
 }
 
 // ─── Pipeline Assembly ───────────────────────────────────────────────────────
@@ -177,26 +250,17 @@ function assemblePipeline(
   const scorer = new RelevanceScorer();
 
   const contextCollector = new ContextCollector(
-    gitProvider,
-    astParser,
-    dependencyResolver,
-    scorer,
-    fileReader,
+    gitProvider, astParser, dependencyResolver, scorer, fileReader,
     llm.estimateTokens.bind(llm),
   );
-
-  const rootCauseAnalyzer = new RootCauseAnalyzer(llm);
-  const patchGenerator = new PatchGenerator(llm);
-  const patchApplier = new PatchApplier(fileReader, fileWriter);
-  const outputFormatter = createFormatter(outputMode);
 
   return new Pipeline({
     inputParser: new InputParser(),
     contextCollector,
-    rootCauseAnalyzer,
-    patchGenerator,
-    outputFormatter,
-    patchApplier,
+    rootCauseAnalyzer: new RootCauseAnalyzer(llm),
+    patchGenerator: new PatchGenerator(llm),
+    outputFormatter: createFormatter(outputMode),
+    patchApplier: new PatchApplier(fileReader, fileWriter),
   });
 }
 
@@ -205,12 +269,42 @@ function assemblePipeline(
 async function writeOutput(result: string, opts: CLIOptions): Promise<void> {
   if (opts.output) {
     await fsWriteFile(opts.output, result, 'utf-8');
-    if (opts.verbose) {
-      console.error(`Output written to ${opts.output}`);
-    }
+    process.stderr.write(`\n  ${chalk.green('✔')} Output written to ${chalk.cyan(opts.output)}\n`);
   } else {
     process.stdout.write(result + '\n');
   }
+}
+
+// ─── Friendly Error Messages ─────────────────────────────────────────────────
+
+function friendlyError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+
+  // Network errors
+  if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED')) {
+    const isOllama = msg.includes('11434');
+    if (isOllama) {
+      return `Cannot connect to Ollama at localhost:11434.\n\n  Is Ollama running? Start it with: ${chalk.cyan('ollama serve')}`;
+    }
+    return `Network error — cannot reach the LLM API.\n\n  Check your internet connection and API endpoint.\n  If using a custom endpoint, verify --base-url is correct.`;
+  }
+
+  // Auth errors
+  if (msg.includes('401') || msg.includes('Unauthorized') || msg.includes('Invalid API key')) {
+    return `Authentication failed — your API key may be invalid or expired.\n\n  Update it with: ${chalk.cyan('contextfix init')}`;
+  }
+
+  // Rate limit
+  if (msg.includes('429') || msg.includes('rate limit') || msg.includes('Rate limit')) {
+    return 'Rate limited by the LLM API. Wait a moment and try again.';
+  }
+
+  // Timeout
+  if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
+    return 'Request timed out. The LLM API may be slow or unreachable. Try again.';
+  }
+
+  return msg;
 }
 
 // ─── Command Handlers ────────────────────────────────────────────────────────
@@ -219,36 +313,51 @@ async function handleFix(
   bugDescription: string | undefined,
   opts: CLIOptions,
 ): Promise<void> {
+  const spinner = new Spinner();
+  const totalStart = Date.now();
+
   const { input, source } = await resolveInput(bugDescription, opts);
   const repoPath = resolve('.');
 
+  spinner.start('Loading configuration...');
   const configManager = new ConfigManager();
   const config = await configManager.load(repoPath);
+  spinner.succeed('Configuration loaded');
 
   const model = opts.model ?? config.model;
-  const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? '';
-
-  validateApiKey(model, apiKey || undefined);
+  const apiKey = resolveApiKey(config, model);
+  const baseUrl = resolveBaseUrl(config, opts);
+  validateApiKey(model, apiKey);
 
   const outputMode: OutputMode = opts.json ? 'json' : 'terminal';
-  const pipeline = assemblePipeline(model, apiKey, repoPath, outputMode, opts.baseUrl);
+  const pipeline = assemblePipeline(model, apiKey!, repoPath, outputMode, baseUrl);
 
   if (opts.verbose) {
-    console.error(`Model: ${model}`);
-    if (opts.baseUrl) console.error(`Base URL: ${opts.baseUrl}`);
-    console.error(`Context limit: ${opts.contextLimit}`);
-    console.error(`Input source: ${source}`);
-    console.error(`Apply: ${opts.apply}, Dry-run: ${opts.dryRun}`);
+    process.stderr.write(chalk.dim(`  Model: ${model}\n`));
+    if (baseUrl) process.stderr.write(chalk.dim(`  Base URL: ${baseUrl}\n`));
+    process.stderr.write(chalk.dim(`  Context limit: ${opts.contextLimit} tokens\n`));
+    process.stderr.write(chalk.dim(`  Input: ${source}\n\n`));
   }
 
-  const result = await pipeline.fix(input, source, {
-    contextLimit: opts.contextLimit,
-    repoPath,
-    gitHistoryDepth: 10,
-    ignorePatterns: config.ignorePatterns,
-    apply: opts.apply,
-    dryRun: opts.dryRun,
-  });
+  spinner.start('Parsing input & collecting context...');
+  let result: string;
+  try {
+    result = await pipeline.fix(input, source, {
+      contextLimit: opts.contextLimit,
+      repoPath,
+      gitHistoryDepth: 10,
+      ignorePatterns: config.ignorePatterns,
+      apply: opts.apply,
+      dryRun: opts.dryRun,
+    });
+    spinner.succeed('Analysis & patch generation complete');
+  } catch (err) {
+    spinner.fail('Pipeline failed');
+    throw err;
+  }
+
+  const totalElapsed = ((Date.now() - totalStart) / 1000).toFixed(1);
+  process.stderr.write(chalk.dim(`\n  Done in ${totalElapsed}s\n\n`));
 
   await writeOutput(result, opts);
 }
@@ -257,37 +366,97 @@ async function handleAnalyze(
   bugDescription: string | undefined,
   opts: CLIOptions,
 ): Promise<void> {
+  const spinner = new Spinner();
+  const totalStart = Date.now();
+
   const { input, source } = await resolveInput(bugDescription, opts);
   const repoPath = resolve('.');
 
+  spinner.start('Loading configuration...');
   const configManager = new ConfigManager();
   const config = await configManager.load(repoPath);
+  spinner.succeed('Configuration loaded');
 
   const model = opts.model ?? config.model;
-  const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? '';
-
-  validateApiKey(model, apiKey || undefined);
+  const apiKey = resolveApiKey(config, model);
+  const baseUrl = resolveBaseUrl(config, opts);
+  validateApiKey(model, apiKey);
 
   const outputMode: OutputMode = opts.json ? 'json' : 'terminal';
-  const pipeline = assemblePipeline(model, apiKey, repoPath, outputMode, opts.baseUrl);
+  const pipeline = assemblePipeline(model, apiKey!, repoPath, outputMode, baseUrl);
 
   if (opts.verbose) {
-    console.error(`Model: ${model}`);
-    if (opts.baseUrl) console.error(`Base URL: ${opts.baseUrl}`);
-    console.error(`Context limit: ${opts.contextLimit}`);
-    console.error(`Input source: ${source}`);
+    process.stderr.write(chalk.dim(`  Model: ${model}\n`));
+    if (baseUrl) process.stderr.write(chalk.dim(`  Base URL: ${baseUrl}\n`));
+    process.stderr.write(chalk.dim(`  Context limit: ${opts.contextLimit} tokens\n\n`));
   }
 
-  const result = await pipeline.analyze(input, source, {
-    contextLimit: opts.contextLimit,
-    repoPath,
-    gitHistoryDepth: 10,
-    ignorePatterns: config.ignorePatterns,
-    apply: false,
-    dryRun: false,
-  });
+  spinner.start('Parsing input & analyzing root cause...');
+  let result: string;
+  try {
+    result = await pipeline.analyze(input, source, {
+      contextLimit: opts.contextLimit,
+      repoPath,
+      gitHistoryDepth: 10,
+      ignorePatterns: config.ignorePatterns,
+      apply: false,
+      dryRun: false,
+    });
+    spinner.succeed('Root cause analysis complete');
+  } catch (err) {
+    spinner.fail('Analysis failed');
+    throw err;
+  }
+
+  const totalElapsed = ((Date.now() - totalStart) / 1000).toFixed(1);
+  process.stderr.write(chalk.dim(`\n  Done in ${totalElapsed}s\n\n`));
 
   await writeOutput(result, opts);
+}
+
+// ─── Init Command Handler ────────────────────────────────────────────────────
+
+async function handleInit(): Promise<void> {
+  const repoPath = resolve('.');
+  const configPath = join(repoPath, '.contextfix.yml');
+
+  try {
+    await stat(configPath);
+    process.stderr.write(`\n  ${chalk.yellow('!')} .contextfix.yml already exists. Edit it manually or delete it first.\n\n`);
+    return;
+  } catch {
+    // File doesn't exist — create it
+  }
+
+  const template = `# ContextFix configuration
+# Docs: https://github.com/nanami7777777/Context-Aware-Fixer
+
+# LLM model (provider:model)
+model: "openai:gpt-4"
+
+# API key (or set OPENAI_API_KEY / ANTHROPIC_API_KEY env var)
+# apiKey: "sk-..."
+
+# Custom API endpoint for OpenAI-compatible services
+# baseUrl: "https://api.openai.com/v1"
+
+# Max context window tokens
+contextLimit: 8000
+
+# Files/directories to exclude from context collection
+ignorePatterns:
+  - node_modules
+  - .git
+  - dist
+  - build
+  - coverage
+`;
+
+  await fsWriteFile(configPath, template, 'utf-8');
+  process.stderr.write(`\n  ${chalk.green('✔')} Created ${chalk.cyan('.contextfix.yml')}\n`);
+  process.stderr.write(`\n  Next steps:\n`);
+  process.stderr.write(`  ${chalk.dim('1.')} Set your API key in the config or via env var\n`);
+  process.stderr.write(`  ${chalk.dim('2.')} Run ${chalk.cyan('contextfix fix "your error message"')}\n\n`);
 }
 
 // ─── Program Definition ──────────────────────────────────────────────────────
@@ -300,11 +469,16 @@ program
   .version('0.1.0');
 
 program
+  .command('init')
+  .description('Create a .contextfix.yml config file in the current directory')
+  .action(handleInit);
+
+program
   .command('fix')
   .description('Analyze a bug and generate a fix patch')
   .argument('[bug-description]', 'Bug description, error message, or stack trace')
   .option('-m, --model <model>', 'AI model identifier (provider:model)', 'openai:gpt-4')
-  .option('-c, --context-limit <tokens>', 'Maximum context window tokens', (v) => parseInt(v, 10), 8000)
+  .option('-c, --context-limit <tokens>', 'Max context window tokens', (v) => parseInt(v, 10), 8000)
   .option('-v, --verbose', 'Enable verbose logging', false)
   .option('-o, --output <file>', 'Write output to a file instead of stdout')
   .option('--apply', 'Apply the generated patch directly', false)
@@ -332,7 +506,7 @@ program
   .description('Analyze a bug without generating a patch')
   .argument('[bug-description]', 'Bug description, error message, or stack trace')
   .option('-m, --model <model>', 'AI model identifier (provider:model)', 'openai:gpt-4')
-  .option('-c, --context-limit <tokens>', 'Maximum context window tokens', (v) => parseInt(v, 10), 8000)
+  .option('-c, --context-limit <tokens>', 'Max context window tokens', (v) => parseInt(v, 10), 8000)
   .option('-v, --verbose', 'Enable verbose logging', false)
   .option('-o, --output <file>', 'Write output to a file instead of stdout')
   .option('--json', 'Output in JSON format', false)
@@ -356,7 +530,7 @@ program
 // ─── Error Handling & Execution ──────────────────────────────────────────────
 
 program.parseAsync(process.argv).catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  console.error(`\n  ✗ ${message}\n`);
+  const message = friendlyError(err);
+  process.stderr.write(`\n  ${chalk.red('✗')} ${message}\n\n`);
   process.exit(1);
 });

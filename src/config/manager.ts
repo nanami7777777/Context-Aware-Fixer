@@ -137,6 +137,9 @@ export class ConfigManager {
       if ('apiKey' in layer && typeof layer.apiKey === 'string') {
         merged.apiKey = layer.apiKey;
       }
+      if ('baseUrl' in layer && typeof layer.baseUrl === 'string') {
+        merged.baseUrl = layer.baseUrl;
+      }
       if ('contextLimit' in layer && typeof layer.contextLimit === 'number') {
         merged.contextLimit = layer.contextLimit;
       }

@@ -68,6 +68,10 @@ export class ConfigSerializer {
       config.apiKey = obj.apiKey;
     }
 
+    if (typeof obj.baseUrl === 'string') {
+      config.baseUrl = obj.baseUrl;
+    }
+
     if (
       obj.promptTemplates != null &&
       typeof obj.promptTemplates === 'object' &&
@@ -92,6 +96,10 @@ export class ConfigSerializer {
 
     if (config.apiKey !== undefined) {
       obj.apiKey = config.apiKey;
+    }
+
+    if (config.baseUrl !== undefined) {
+      obj.baseUrl = config.baseUrl;
     }
 
     if (config.promptTemplates !== undefined) {
