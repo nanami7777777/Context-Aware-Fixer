@@ -11,6 +11,50 @@
 
 TypeScript 原生实现，LLM 调用零外部 SDK 依赖，Node.js 环境即可运行。
 
+## 效果演示
+
+```
+$ contextfix analyze "TypeError: Cannot read properties of undefined (reading 'name') at processUser in src/pipeline.ts:15"
+
+▶ 根因分析
+────────────────────────────────────────
+
+摘要: processData 缺少空值检查 — data 参数可能为 undefined。
+
+#1 [置信度: 95%]
+  定位: src/pipeline.ts:15
+  描述: processData 在未检查 null 的情况下访问 'name' 属性
+  影响: data 为 undefined 时应用崩溃
+  证据:
+    • [代码片段] src/pipeline.ts:15: return data.name;
+
+#2 [置信度: 60%]
+  定位: src/pipeline.ts:42
+  描述: 调用方未验证输入就传给 processData
+  影响: 上游缺少输入校验，间接导致问题
+```
+
+```
+$ contextfix fix "TypeError: Cannot read properties of undefined" --dry-run
+
+▶ 补丁
+ID: patch-1
+描述: 在访问 data.name 前添加空值守卫
+
+--- src/pipeline.ts
++++ src/pipeline.ts
+@@ -14,2 +14,5 @@
+ function processData(data: any) {
++  if (data == null) {
++    return undefined;
++  }
+   return data.name;
+ }
+
+✔ 补丁预览（dry-run）— 未修改任何文件。
+文件: src/pipeline.ts | +3 -0
+```
+
 ## 为什么选择 ContextFix
 
 大多数 AI 编程工具只是把错误信息丢给模型碰运气。ContextFix 不一样：
@@ -205,6 +249,22 @@ pnpm dev
 - P8: 配置合并优先级
 - P9: .gitignore 过滤一致性
 - P10: 输出模式自动检测（管道中无 ANSI 转义）
+
+## 对比
+
+| 特性 | ContextFix | SWE-agent | Aider | Cursor |
+|------|-----------|-----------|-------|--------|
+| 语言 | TypeScript | Python | Python | Electron |
+| 安装 | `npx contextfix` | pip + docker | pip | 桌面应用 |
+| 依赖图分析 | ✅ | ❌ | ❌ | ❌ |
+| Git 历史上下文 | ✅ | ✅ | ✅ | ❌ |
+| 相关性评分 | ✅（加权算法） | ❌ | ❌ | ❌ |
+| 多语言 import 解析 | ✅（6 种语言） | ❌ | ❌ | ❌ |
+| 自定义 LLM endpoint | ✅ | ❌ | ✅ | ❌ |
+| Ollama 本地模型 | ✅ | ❌ | ✅ | ❌ |
+| Unified diff 输出 | ✅ | ✅ | ✅ | ❌ |
+| 属性测试 | ✅（10 个属性） | ❌ | ❌ | ❌ |
+| 打包体积 | 97KB | — | — | — |
 
 ## 技术栈
 

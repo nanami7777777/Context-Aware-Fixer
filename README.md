@@ -11,6 +11,50 @@ Context-aware AI bug-fixing assistant for your codebase. Analyzes repository con
 
 Built with TypeScript. Zero external SDK dependencies for LLM calls. Runs anywhere Node.js runs.
 
+## Demo
+
+```
+$ contextfix analyze "TypeError: Cannot read properties of undefined (reading 'name') at processUser in src/pipeline.ts:15"
+
+▶ Root Cause Analysis
+────────────────────────────────────────
+
+Summary: Missing null check in processData — data parameter can be undefined.
+
+#1 [confidence: 95%]
+  Location: src/pipeline.ts:15
+  Description: processData accesses property 'name' without null check
+  Impact: App crashes when data is undefined
+  Evidence:
+    • [code-snippet] src/pipeline.ts:15: return data.name;
+
+#2 [confidence: 60%]
+  Location: src/pipeline.ts:42
+  Description: Caller passes unvalidated input to processData
+  Impact: Secondary contributor — no input validation upstream
+```
+
+```
+$ contextfix fix "TypeError: Cannot read properties of undefined" --dry-run
+
+▶ Patch
+ID: patch-1
+Description: Add null guard before accessing data.name
+
+--- src/pipeline.ts
++++ src/pipeline.ts
+@@ -14,2 +14,5 @@
+ function processData(data: any) {
++  if (data == null) {
++    return undefined;
++  }
+   return data.name;
+ }
+
+✔ Patch preview (dry-run) — no files modified.
+Files: src/pipeline.ts | +3 -0
+```
+
 ## Why ContextFix
 
 Most AI coding tools paste your error into a prompt and hope for the best. ContextFix takes a different approach:
@@ -205,6 +249,22 @@ The project uses Vitest for unit tests and fast-check for property-based tests. 
 - P8: Config merge priority
 - P9: .gitignore filtering consistency
 - P10: Auto TTY detection (no ANSI in pipes)
+
+## Comparison
+
+| Feature | ContextFix | SWE-agent | Aider | Cursor |
+|---------|-----------|-----------|-------|--------|
+| Language | TypeScript | Python | Python | Electron |
+| Install | `npx contextfix` | pip + docker | pip | Desktop app |
+| Dependency graph analysis | ✅ | ❌ | ❌ | ❌ |
+| Git history context | ✅ | ✅ | ✅ | ❌ |
+| Relevance scoring | ✅ (weighted algorithm) | ❌ | ❌ | ❌ |
+| Multi-language import parsing | ✅ (6 languages) | ❌ | ❌ | ❌ |
+| Custom LLM endpoint | ✅ | ❌ | ✅ | ❌ |
+| Ollama (local) | ✅ | ❌ | ✅ | ❌ |
+| Unified diff output | ✅ | ✅ | ✅ | ❌ |
+| Property-based tests | ✅ (10 properties) | ❌ | ❌ | ❌ |
+| Bundle size | 97KB | — | — | — |
 
 ## Tech Stack
 
