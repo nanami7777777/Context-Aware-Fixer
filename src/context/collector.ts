@@ -84,7 +84,14 @@ export class ContextCollector {
     const stackTracePaths = this.extractStackTracePaths(report, config.repoPath);
 
     // Read mentioned files and build file content map
-    const allMentionedPaths = [...new Set([...mentionedPaths, ...stackTracePaths])];
+    let allMentionedPaths = [...new Set([...mentionedPaths, ...stackTracePaths])];
+
+    // If no files were mentioned, try keyword-based discovery
+    if (allMentionedPaths.length === 0 && report.keywords.length > 0) {
+      const discovered = await this.discoverFilesByKeywords(report.keywords, config);
+      allMentionedPaths = discovered;
+    }
+
     const fileContents = new Map<string, string>();
 
     for (const filePath of allMentionedPaths) {
@@ -252,6 +259,79 @@ export class ContextCollector {
   private extractStackTracePaths(report: BugReport, repoPath: string): string[] {
     if (!report.stackTrace) return [];
     return report.stackTrace.map((frame) => path.resolve(repoPath, frame.filePath));
+  }
+
+  /**
+   * Discover relevant files by scanning the repo for keyword matches.
+   * Used when the bug report doesn't contain explicit file paths.
+   * Searches file names and content for keywords like function names, class names, etc.
+   */
+  private async discoverFilesByKeywords(
+    keywords: string[],
+    config: ContextConfig,
+  ): Promise<string[]> {
+    const CODE_EXTENSIONS = new Set([
+      '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+      '.py', '.pyw',
+      '.java',
+      '.go',
+      '.rs',
+      '.c', '.cpp', '.h', '.hpp',
+    ]);
+
+    try {
+      const allFiles = await this.fileReader.listFiles(config.repoPath);
+      const candidates: Array<{ path: string; score: number }> = [];
+
+      for (const filePath of allFiles) {
+        // Skip non-code files
+        const ext = filePath.slice(filePath.lastIndexOf('.'));
+        if (!CODE_EXTENSIONS.has(ext)) continue;
+
+        const relativePath = path.relative(config.repoPath, filePath);
+
+        // Skip ignored patterns
+        if (config.ignorePatterns.some(p => relativePath.includes(p))) continue;
+
+        // Check if filename matches any keyword
+        const fileName = path.basename(filePath, ext).toLowerCase();
+        let score = 0;
+
+        for (const keyword of keywords) {
+          const kw = keyword.toLowerCase();
+          if (fileName.includes(kw) || kw.includes(fileName)) {
+            score += 3; // Strong match: filename contains keyword
+          }
+        }
+
+        // If filename matched, read content for deeper matching
+        if (score > 0) {
+          candidates.push({ path: filePath, score });
+        } else {
+          // Quick content scan for keyword matches (only first 5000 chars)
+          try {
+            const content = await this.fileReader.readFile(filePath);
+            const snippet = content.slice(0, 5000).toLowerCase();
+            for (const keyword of keywords) {
+              if (snippet.includes(keyword.toLowerCase())) {
+                score += 1;
+              }
+            }
+            if (score > 0) {
+              candidates.push({ path: filePath, score });
+            }
+          } catch {
+            // Skip unreadable files
+          }
+        }
+      }
+
+      // Return top 10 most relevant files
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates.slice(0, 10).map(c => c.path);
+    } catch {
+      return [];
+    }
   }
 
   /** Compute the minimum import depth from any mentioned file to the target */

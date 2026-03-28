@@ -18,6 +18,7 @@ import { PatchGenerator } from './patch/generator.js';
 import { PatchApplier } from './patch/applier.js';
 import { createFormatter } from './output/formatter.js';
 import { Pipeline } from './pipeline.js';
+import { detectTestCommand } from './test-runner.js';
 import { LanguageRegistry } from './context/languages/registry.js';
 import { typescriptParser, javascriptParser } from './context/languages/typescript.js';
 import { pythonParser } from './context/languages/python.js';
@@ -41,6 +42,7 @@ interface CLIOptions {
   json: boolean;
   file?: string;
   baseUrl?: string;
+  verify: boolean;
 }
 
 // ─── Progress Spinner ────────────────────────────────────────────────────────
@@ -342,6 +344,15 @@ async function handleFix(
   spinner.start('Parsing input & collecting context...');
   let result: string;
   try {
+    // Detect test command if --verify or --apply is used
+    let testCommand: string | null = null;
+    if (opts.verify && opts.apply) {
+      testCommand = await detectTestCommand(repoPath);
+      if (testCommand && opts.verbose) {
+        process.stderr.write(chalk.dim(`  Test command: ${testCommand}\n`));
+      }
+    }
+
     result = await pipeline.fix(input, source, {
       contextLimit: opts.contextLimit,
       repoPath,
@@ -349,6 +360,7 @@ async function handleFix(
       ignorePatterns: config.ignorePatterns,
       apply: opts.apply,
       dryRun: opts.dryRun,
+      testCommand,
     });
     spinner.succeed('Analysis & patch generation complete');
   } catch (err) {
@@ -474,6 +486,33 @@ program
   .action(handleInit);
 
 program
+  .command('chat')
+  .description('Interactive chat mode for iterative bug analysis')
+  .option('-m, --model <model>', 'AI model identifier (provider:model)', 'openai:gpt-4')
+  .option('-v, --verbose', 'Enable verbose logging', false)
+  .option('-b, --base-url <url>', 'Custom API base URL for OpenAI-compatible endpoints')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const repoPath = resolve('.');
+    const configManager = new ConfigManager();
+    const config = await configManager.load(repoPath);
+
+    const model = (cmdOpts.model as string) ?? config.model;
+    const apiKey = resolveApiKey(config, model);
+    const baseUrl = (cmdOpts.baseUrl as string) ?? config.baseUrl ?? process.env.CONTEXTFIX_BASE_URL;
+    validateApiKey(model, apiKey);
+
+    const { createLLMProvider: createProvider } = await import('./llm/provider.js');
+    const llm = createProvider(model, apiKey!, baseUrl);
+
+    const { runInteractive } = await import('./interactive.js');
+    await runInteractive({
+      llm,
+      repoPath,
+      verbose: cmdOpts.verbose as boolean,
+    });
+  });
+
+program
   .command('fix')
   .description('Analyze a bug and generate a fix patch')
   .argument('[bug-description]', 'Bug description, error message, or stack trace')
@@ -483,6 +522,7 @@ program
   .option('-o, --output <file>', 'Write output to a file instead of stdout')
   .option('--apply', 'Apply the generated patch directly', false)
   .option('--dry-run', 'Preview patch changes without applying', false)
+  .option('--verify', 'Run tests after applying patch to verify the fix', false)
   .option('--json', 'Output in JSON format', false)
   .option('-f, --file <path>', 'Read bug description from a file')
   .option('-b, --base-url <url>', 'Custom API base URL for OpenAI-compatible endpoints')
@@ -497,6 +537,7 @@ program
       json: cmdOpts.json as boolean,
       file: cmdOpts.file as string | undefined,
       baseUrl: cmdOpts.baseUrl as string | undefined,
+      verify: cmdOpts.verify as boolean,
     };
     await handleFix(bugDescription, opts);
   });
@@ -523,6 +564,7 @@ program
       json: cmdOpts.json as boolean,
       file: cmdOpts.file as string | undefined,
       baseUrl: cmdOpts.baseUrl as string | undefined,
+      verify: false,
     };
     await handleAnalyze(bugDescription, opts);
   });

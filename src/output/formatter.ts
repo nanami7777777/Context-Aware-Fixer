@@ -1,5 +1,6 @@
 import type { RootCauseReport, Patch, OutputMode } from '../types.js';
 import type { ApplyResult } from '../patch/applier.js';
+import type { TestResult } from '../test-runner.js';
 import { TerminalFormatter } from './terminal.js';
 import { JsonFormatter } from './json.js';
 
@@ -9,6 +10,7 @@ export interface OutputFormatter {
   formatAnalysis(report: RootCauseReport): string;
   formatPatch(patch: Patch): string;
   formatApplyResult(result: ApplyResult): string;
+  formatTestResult(result: TestResult): string;
 }
 
 // ─── Plain Formatter ─────────────────────────────────────────────────────────
@@ -89,6 +91,40 @@ export class PlainFormatter implements OutputFormatter {
           lines.push(`  ${conflict.filePath}: ${conflict.reason}`);
           lines.push(`    Suggestion: ${conflict.suggestion}`);
         }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  formatTestResult(result: TestResult): string {
+    const lines: string[] = [];
+    const elapsed = result.duration < 1000
+      ? `${result.duration}ms`
+      : `${(result.duration / 1000).toFixed(1)}s`;
+
+    if (result.success) {
+      lines.push(`Tests passed (${elapsed})`);
+      lines.push(`Command: ${result.command}`);
+    } else {
+      lines.push(`Tests FAILED (exit code ${result.exitCode}, ${elapsed})`);
+      lines.push(`Command: ${result.command}`);
+      if (result.stderr.trim()) {
+        lines.push('');
+        lines.push('stderr:');
+        // Show last 30 lines of stderr
+        const stderrLines = result.stderr.trim().split('\n');
+        const tail = stderrLines.slice(-30);
+        if (stderrLines.length > 30) lines.push(`  ... (${stderrLines.length - 30} lines truncated)`);
+        for (const l of tail) lines.push(`  ${l}`);
+      }
+      if (result.stdout.trim()) {
+        lines.push('');
+        lines.push('stdout:');
+        const stdoutLines = result.stdout.trim().split('\n');
+        const tail = stdoutLines.slice(-30);
+        if (stdoutLines.length > 30) lines.push(`  ... (${stdoutLines.length - 30} lines truncated)`);
+        for (const l of tail) lines.push(`  ${l}`);
       }
     }
 

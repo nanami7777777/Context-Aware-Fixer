@@ -1,6 +1,7 @@
 import { Chalk } from 'chalk';
 import type { RootCauseReport, Patch } from '../types.js';
 import type { ApplyResult } from '../patch/applier.js';
+import type { TestResult } from '../test-runner.js';
 import type { OutputFormatter } from './formatter.js';
 
 // Force color output — TerminalFormatter is only used when TTY is detected.
@@ -122,6 +123,33 @@ export class TerminalFormatter implements OutputFormatter {
           lines.push(`  ${chalk.red(conflict.filePath)}: ${conflict.reason}`);
           lines.push(`    ${chalk.dim('Suggestion:')} ${conflict.suggestion}`);
         }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  formatTestResult(result: TestResult): string {
+    const lines: string[] = [];
+    const elapsed = result.duration < 1000
+      ? `${result.duration}ms`
+      : `${(result.duration / 1000).toFixed(1)}s`;
+
+    if (result.success) {
+      lines.push(chalk.green.bold(`✔ Tests passed`) + chalk.dim(` (${elapsed})`));
+      lines.push(`${chalk.bold('Command:')} ${chalk.dim(result.command)}`);
+    } else {
+      lines.push(chalk.red.bold(`✘ Tests FAILED`) + chalk.dim(` (exit ${result.exitCode}, ${elapsed})`));
+      lines.push(`${chalk.bold('Command:')} ${chalk.dim(result.command)}`);
+      if (result.stderr.trim()) {
+        lines.push('');
+        const stderrLines = result.stderr.trim().split('\n').slice(-20);
+        for (const l of stderrLines) lines.push(chalk.red(`  ${l}`));
+      }
+      if (result.stdout.trim()) {
+        lines.push('');
+        const stdoutLines = result.stdout.trim().split('\n').slice(-20);
+        for (const l of stdoutLines) lines.push(chalk.dim(`  ${l}`));
       }
     }
 

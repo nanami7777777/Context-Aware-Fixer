@@ -7,6 +7,8 @@ import type { PatchGenerator } from './patch/generator.js';
 import type { OutputFormatter } from './output/formatter.js';
 import type { PatchApplier } from './patch/applier.js';
 import type { InputSource, RootCauseReport } from './types.js';
+import { runTests } from './test-runner.js';
+import type { TestResult } from './test-runner.js';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -18,6 +20,7 @@ export interface PipelineConfig {
   ignorePatterns: string[];
   apply: boolean;
   dryRun: boolean;
+  testCommand?: string | null;
 }
 
 /** Dependencies injected into the Pipeline */
@@ -117,6 +120,12 @@ export class Pipeline {
               ? await this.patchApplier.preview(patch, config.repoPath)
               : await this.patchApplier.apply(patch, config.repoPath);
             output.push(this.outputFormatter.formatApplyResult(result));
+
+            // 6. Run tests to verify the patch (only after real apply, not dry-run)
+            if (config.apply && result.success && config.testCommand) {
+              const testResult = await runTests(config.testCommand, config.repoPath);
+              output.push(this.outputFormatter.formatTestResult(testResult));
+            }
           }
         }
       }
