@@ -106,6 +106,25 @@ contextfix fix "null pointer in UserService" --dry-run
 contextfix analyze "app crashes when quantity is zero"
 ```
 
+### Interactive chat mode
+
+```bash
+# Start an interactive session for iterative debugging
+contextfix chat
+
+# With a specific model
+contextfix chat --model openai:kimi-k2.5 --base-url https://coding.dashscope.aliyuncs.com/v1
+```
+
+In chat mode you can ask follow-up questions, refine the analysis, and iterate on fixes. Commands: `/clear`, `/history`, `/quit`.
+
+### Apply and verify
+
+```bash
+# Apply patch and run tests to verify the fix
+contextfix fix "TypeError in handler" --apply --verify
+```
+
 ### Options
 
 | Flag | Description | Default |
@@ -114,8 +133,10 @@ contextfix analyze "app crashes when quantity is zero"
 | `-c, --context-limit <n>` | Max context window tokens | `8000` |
 | `-v, --verbose` | Verbose logging | `false` |
 | `-o, --output <file>` | Write output to file | stdout |
+| `-b, --base-url <url>` | Custom API base URL | — |
 | `--apply` | Apply patch to files | `false` |
 | `--dry-run` | Preview patch without applying | `false` |
+| `--verify` | Run tests after applying | `false` |
 | `--json` | JSON output format | `false` |
 | `-f, --file <path>` | Read bug description from file | — |
 

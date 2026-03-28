@@ -106,6 +106,25 @@ contextfix fix "UserService 空指针" --dry-run
 contextfix analyze "数量为零时应用崩溃"
 ```
 
+### 交互式对话模式
+
+```bash
+# 启动交互式调试会话
+contextfix chat
+
+# 指定模型
+contextfix chat --model openai:kimi-k2.5 --base-url https://coding.dashscope.aliyuncs.com/v1
+```
+
+对话模式下可以追问、调整分析方向、迭代修复方案。命令：`/clear`、`/history`、`/quit`。
+
+### 应用并验证
+
+```bash
+# 应用补丁后自动跑测试验证
+contextfix fix "handler 中的 TypeError" --apply --verify
+```
+
 ### 参数说明
 
 | 参数 | 说明 | 默认值 |
@@ -114,8 +133,10 @@ contextfix analyze "数量为零时应用崩溃"
 | `-c, --context-limit <n>` | 上下文窗口最大 token 数 | `8000` |
 | `-v, --verbose` | 详细日志 | `false` |
 | `-o, --output <file>` | 输出到文件 | stdout |
+| `-b, --base-url <url>` | 自定义 API 地址 | — |
 | `--apply` | 直接应用补丁 | `false` |
 | `--dry-run` | 预览补丁变更 | `false` |
+| `--verify` | 应用后跑测试验证 | `false` |
 | `--json` | JSON 格式输出 | `false` |
 | `-f, --file <path>` | 从文件读取 Bug 描述 | — |
 
